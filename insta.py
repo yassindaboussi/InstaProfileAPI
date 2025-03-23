@@ -18,24 +18,33 @@ def get_profile_picture(username):
     try:
         session = requests.Session()
         response = session.get(url, headers=headers, timeout=10)
-        app.logger.info(f"Status Code: {response.status_code}")
-        app.logger.info(f"Final URL: {response.url}")
+        final_url = response.url
+        status_code = response.status_code
+        html_content = response.text  # Capture the full HTML
 
-        # Check if redirected to a login page
-        if 'accounts/login' in response.url:
+        app.logger.info(f"Status Code: {status_code}")
+        app.logger.info(f"Final URL: {final_url}")
+
+        # Check for login redirect
+        if 'accounts/login' in final_url:
             app.logger.error("Blocked: Redirected to Instagram login page.")
-            return None
+            return None, html_content  # Return HTML for debugging
 
-        if response.status_code == 200:
-            soup = BeautifulSoup(response.text, 'html.parser')
+        if status_code == 200:
+            soup = BeautifulSoup(html_content, 'html.parser')
             meta_tag = soup.find("meta", property="og:image")
             if meta_tag:
-                return meta_tag['content']
+                return meta_tag['content'], None  # Success case
+            else:
+                app.logger.error("og:image meta tag not found.")
+                return None, html_content  # Return HTML to debug missing tag
         else:
-            app.logger.error(f"Failed with status code: {response.status_code}")
+            app.logger.error(f"Non-200 Status Code: {status_code}")
+            return None, html_content  # Return HTML for non-200 errors
+
     except Exception as e:
         app.logger.error(f"Request failed: {str(e)}")
-    return None
+        return None, str(e)  # Return exception message
 
 @app.route('/profile_picture', methods=['GET'])
 def profile_picture():
@@ -43,11 +52,16 @@ def profile_picture():
     if not username:
         return jsonify({"error": "Username is required"}), 400
     
-    profile_pic_url = get_profile_picture(username)
+    profile_pic_url, html_or_error = get_profile_picture(username)
     if profile_pic_url:
         return jsonify({"profile_picture_url": profile_pic_url})
     else:
-        return jsonify({"error": "Failed to fetch profile picture. Instagram is blocking the request."}), 404
+        # Truncate HTML to avoid huge responses
+        truncated_html = html_or_error[:1000] if isinstance(html_or_error, str) else None
+        return jsonify({
+            "error": "Failed to fetch profile picture. Instagram is blocking the request.",
+            "html_snippet": truncated_html  # First 1000 characters of HTML/error
+        }), 404
 
 if __name__ == '__main__':
     app.run(debug=True)
